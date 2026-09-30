@@ -2197,10 +2197,15 @@
         "connected": "设备已接入",
         "copied": "已复制",
         "copyFailed": "请手动选择下方命令",
+        "platformLabel": "目标平台",
+        "platformBash": "macOS / Linux（Bash）",
+        "platformPowerShell": "Windows（PowerShell）",
         "oneLineLabel": "复制后在目标机器上运行",
+        "powerShellLabel": "复制后在 Windows PowerShell 中运行",
         "safetyClaude": "Agent CLI、文件与密钥都留在这台机器上。",
         "waitingConnection": "等待设备接入…",
-        "safetyState": "配置、日志、状态和缓存都写在 ~/.parsar/ 下，不会写进 Agent 正在处理的仓库。"
+        "safetyState": "配置、日志、状态和缓存都写在 ~/.parsar/ 下，不会写进 Agent 正在处理的仓库。",
+        "powerShellHint": "请在 Windows 10 或 11 的 Windows PowerShell 中运行此命令。它会下载原生 daemon 并在后台启动。"
       },
       "delete": {
         "confirm": "删除"

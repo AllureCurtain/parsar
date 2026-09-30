@@ -9,11 +9,9 @@ import (
 	"github.com/MiniMax-AI-Dev/parsar/apps/parsar-daemon/internal/paths"
 )
 
-// runStop sends SIGTERM to the pid in ~/.parsar/parsar-daemon/<profile>/
-// connect.pid, escalates to SIGKILL after killTimeout, then removes
-// the pidfile. Idempotent: missing / stale pidfile cleans up and
-// exits 0 — the user's goal is "no background daemon" and that holds
-// either way.
+// runStop requests graceful shutdown through the platform lifecycle channel,
+// escalates to native termination after killTimeout, then removes the pidfile.
+// It is idempotent: missing or stale pidfiles are cleaned up and exit 0.
 func runStop(ctx *runContext, args []string) error {
 	fs := newFlagSet("stop")
 	profile := fs.String("profile", paths.DefaultProfile, "profile name to stop")
@@ -44,8 +42,8 @@ func runStop(ctx *runContext, args []string) error {
 		return fmt.Errorf("stop: read pidfile: %w", err)
 	}
 
-	fmt.Fprintf(ctx.stdout, "parsar-daemon: sending SIGTERM to pid=%d\n", pid)
-	if err := daemonize.SignalAndWait(pid, killTimeout); err != nil {
+	fmt.Fprintf(ctx.stdout, "parsar-daemon: requesting stop for pid=%d\n", pid)
+	if err := daemonize.SignalAndWait(pid, killTimeout, *profile); err != nil {
 		return fmt.Errorf("stop: signal: %w", err)
 	}
 	if err := daemonize.RemovePIDFile(pidPath); err != nil {

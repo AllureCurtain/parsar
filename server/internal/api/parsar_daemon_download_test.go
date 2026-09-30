@@ -20,16 +20,20 @@ import (
 func TestParsarDaemonDownloadRoute(t *testing.T) {
 	t.Parallel()
 
-	// Stage a binary dir with two of the four platform binaries present,
-	// leaving linux/arm64 absent so the 404 path is exercised too.
+	// Stage a binary dir with three platform binaries present, leaving
+	// linux/arm64 absent so the 404 path is exercised too.
 	dir := t.TempDir()
 	darwinArm64 := []byte("fake-darwin-arm64-binary\x00\x01\x02")
 	linuxAmd64 := []byte("fake-linux-amd64-binary")
+	windowsAmd64 := []byte("fake-windows-amd64-binary")
 	if err := os.WriteFile(filepath.Join(dir, "parsar-daemon-darwin-arm64"), darwinArm64, 0o755); err != nil {
 		t.Fatalf("write darwin binary: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "parsar-daemon-linux-amd64"), linuxAmd64, 0o755); err != nil {
 		t.Fatalf("write linux binary: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "parsar-daemon-windows-amd64.exe"), windowsAmd64, 0o755); err != nil {
+		t.Fatalf("write windows binary: %v", err)
 	}
 
 	r := chi.NewRouter()
@@ -65,6 +69,21 @@ func TestParsarDaemonDownloadRoute(t *testing.T) {
 		}
 	})
 
+	t.Run("serves windows/amd64 exe bytes", func(t *testing.T) {
+		t.Parallel()
+		rec := daemonDownloadGet(r, "/api/v1/parsar-daemon/download?os=windows&arch=amd64")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		body, _ := io.ReadAll(rec.Body)
+		if !bytes.Equal(body, windowsAmd64) {
+			t.Fatalf("windows/amd64 body mismatch")
+		}
+		if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, "parsar-daemon-windows-amd64.exe") {
+			t.Fatalf("Content-Disposition = %q, want .exe attachment", cd)
+		}
+	})
+
 	t.Run("404 when that platform binary is not baked in", func(t *testing.T) {
 		t.Parallel()
 		rec := daemonDownloadGet(r, "/api/v1/parsar-daemon/download?os=linux&arch=arm64")
@@ -79,7 +98,8 @@ func TestParsarDaemonDownloadRoute(t *testing.T) {
 	}{
 		{"missing os", "/api/v1/parsar-daemon/download?arch=arm64"},
 		{"missing arch", "/api/v1/parsar-daemon/download?os=darwin"},
-		{"unknown os", "/api/v1/parsar-daemon/download?os=windows&arch=amd64"},
+		{"unknown os", "/api/v1/parsar-daemon/download?os=freebsd&arch=amd64"},
+		{"unsupported windows arm64", "/api/v1/parsar-daemon/download?os=windows&arch=arm64"},
 		{"unknown arch", "/api/v1/parsar-daemon/download?os=linux&arch=riscv64"},
 		{"path traversal via os", "/api/v1/parsar-daemon/download?os=..%2F..%2Fetc&arch=amd64"},
 		{"path traversal via arch", "/api/v1/parsar-daemon/download?os=linux&arch=..%2F..%2Fpasswd"},

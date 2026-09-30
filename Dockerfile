@@ -102,18 +102,21 @@ COPY apps/parsar-daemon ./apps/parsar-daemon
 
 # Cross-compile the daemon for every platform the install script serves —
 # the allowlist in server/internal/api/parsar_daemon_download.go is
-# {darwin,linux}×{amd64,arm64}. Baking all four into the image lets the
+# {darwin,linux}×{amd64,arm64} plus windows/amd64. Baking all five into the
+# image lets the
 # minting server hand the host-appropriate binary to the one-line connect
 # command with no GitHub release (PARSAR_DAEMON_CONNECT_URL path). CGO
-# stays off so each cross-target links statically.
+# stays off so each cross-target links statically. Windows binaries keep
+# their .exe suffix; the Linux runtime never attempts to chmod them.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     mkdir -p /out/daemon \
- && for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do \
+ && for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64; do \
       os="${target%/*}"; arch="${target#*/}"; \
+      suffix=""; if [ "$os" = windows ]; then suffix=".exe"; fi; \
       CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" GOFLAGS=-trimpath \
         go build -ldflags="-s -w" \
-          -o "/out/daemon/parsar-daemon-${os}-${arch}" \
+          -o "/out/daemon/parsar-daemon-${os}-${arch}${suffix}" \
           ./apps/parsar-daemon/cmd/parsar-daemon; \
     done
 

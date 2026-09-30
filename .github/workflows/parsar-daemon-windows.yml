@@ -1,0 +1,54 @@
+name: parsar-daemon Windows
+
+on:
+  pull_request:
+    paths:
+      - "apps/parsar-daemon/**"
+      - "internal/agentdaemon/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/parsar-daemon-windows.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/parsar-daemon/**"
+      - "internal/agentdaemon/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/parsar-daemon-windows.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: native Windows daemon tests
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run daemon tests
+        shell: bash
+        run: go test ./apps/parsar-daemon/...
+
+      - name: Build Windows daemon
+        shell: bash
+        env:
+          CGO_ENABLED: 0
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -trimpath -buildvcs=false -o dist/parsar-daemon-windows-amd64.exe ./apps/parsar-daemon/cmd/parsar-daemon
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          $path = "dist/parsar-daemon-windows-amd64.exe"
+          if (-not (Test-Path -LiteralPath $path)) { throw "Windows daemon executable was not produced" }
+          if ((Get-Item -LiteralPath $path).Length -le 0) { throw "Windows daemon executable is empty" }

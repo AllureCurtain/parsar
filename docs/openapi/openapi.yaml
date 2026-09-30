@@ -4176,6 +4176,7 @@ paths:
         enum:
         - darwin
         - linux
+        - windows
         in: query
         name: os
         required: true
@@ -4204,6 +4205,21 @@ paths:
           schema:
             type: string
       summary: Download parsar-daemon binary
+      tags:
+      - runtimes
+  /api/v1/parsar-daemon/install.ps1:
+    get:
+      description: Returns the PowerShell script that fetches and installs the Windows
+        x64 parsar-daemon binary. Unauthenticated — the script itself has no secrets.
+      operationId: installParsarDaemonPowerShellScript
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: PowerShell install script body
+          schema:
+            type: string
+      summary: Serve parsar-daemon PowerShell install script
       tags:
       - runtimes
   /api/v1/parsar-daemon/install.sh:

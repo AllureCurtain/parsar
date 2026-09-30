@@ -15,8 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"syscall"
 )
 
 // BackgroundSentinelEnv is set by the parent on the child's
@@ -91,33 +89,16 @@ func Spawn(argv []string, opts ReExecOptions) (int, error) {
 	env = append(env, BackgroundSentinelEnv+"=1")
 	env = append(env, opts.ExtraEnv...)
 
-	cmd := exec.Command(exe, argv[1:]...)
-	cmd.Env = env
-	cmd.Stdin = devNull
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true, // new session → no controlling tty
-	}
-
-	if err := cmd.Start(); err != nil {
+	pid, err := startDetached(exe, argv[1:], env, devNull, logFile)
+	if err != nil {
 		return 0, fmt.Errorf("daemonize: start child: %w", err)
-	}
-
-	pid := cmd.Process.Pid
-
-	// Release rather than Wait — don't take zombie reaping duties.
-	// Init takes over once the parent exits.
-	if err := cmd.Process.Release(); err != nil {
-		// Non-fatal; child is already running. Log to the caller's
-		// chain so it shows up in stderr but doesn't fail the spawn.
-		fmt.Fprintf(os.Stderr, "daemonize: warning: release child: %v\n", err)
 	}
 
 	if err := WritePIDFile(opts.PIDPath, pid); err != nil {
 		// Kill the child so we don't leave a daemon the user can't
 		// `stop` without ps-grepping.
-		_ = syscall.Kill(pid, syscall.SIGTERM)
+		_ = RequestStop(pid)
+		_ = ForceKill(pid)
 		return 0, fmt.Errorf("daemonize: write pidfile (child killed): %w", err)
 	}
 

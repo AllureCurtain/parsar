@@ -79,6 +79,61 @@ func TestParsarDaemonInstallRoute(t *testing.T) {
 	}
 }
 
+func TestParsarDaemonPowerShellInstallRoute(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		cfg         ParsarDaemonInstallConfig
+		wantContain string
+	}{
+		{name: "default_repo", cfg: ParsarDaemonInstallConfig{}, wantContain: `$defaultRepo = '__PARSAR_DAEMON_REPO__'`},
+		{name: "configured_repo", cfg: ParsarDaemonInstallConfig{Repo: "acme/parsar"}, wantContain: `$defaultRepo = 'acme/parsar'`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r := chi.NewRouter()
+			RegisterParsarDaemonInstallRoute(r, tc.cfg)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/parsar-daemon/install.ps1", nil)
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+			if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/x-powershell") {
+				t.Fatalf("Content-Type = %q, want text/x-powershell prefix", got)
+			}
+			if rec.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("Cache-Control = %q, want no-store", rec.Header().Get("Cache-Control"))
+			}
+			body, err := io.ReadAll(rec.Body)
+			if err != nil {
+				t.Fatalf("read body: %v", err)
+			}
+			s := string(body)
+			if !strings.Contains(s, tc.wantContain) {
+				t.Fatalf("body missing %q", tc.wantContain)
+			}
+			for _, marker := range []string{
+				"windows/amd64",
+				"/api/v1/parsar-daemon/download",
+				"https://github.com/",
+				"PARSAR_DAEMON_CONNECT_TOKEN",
+				"connect -b",
+			} {
+				if !strings.Contains(s, marker) {
+					t.Fatalf("body missing PowerShell installer marker %q", marker)
+				}
+			}
+			if strings.Contains(s, "connect -b $env:PARSAR_DAEMON_CONNECT_TOKEN") {
+				t.Fatal("pairing token must not be passed as a process argument")
+			}
+		})
+	}
+}
+
 // TestInstallScriptSupportsOneLineConnect pins the north-star one-liner:
 // the web "copy one command" button pipes this script with the pairing
 // env vars set, and the script must finish the job (chmod + hand off to
@@ -109,6 +164,20 @@ func TestInstallScriptPrefersLocalServerBinary(t *testing.T) {
 	} {
 		if !strings.Contains(installParsarDaemonScript, want) {
 			t.Fatalf("install script missing local-serve marker %q", want)
+		}
+	}
+}
+
+func TestPowerShellInstallScriptDoesNotPutTokenInURLOrArguments(t *testing.T) {
+	t.Parallel()
+	for _, forbidden := range []string{
+		"?token=",
+		"?access_token=",
+		"connect -b $env:PARSAR_DAEMON_CONNECT_TOKEN",
+		"connect -b \"$env:PARSAR_DAEMON_CONNECT_TOKEN\"",
+	} {
+		if strings.Contains(installParsarDaemonPowerShellScript, forbidden) {
+			t.Fatalf("PowerShell installer contains forbidden token placement %q", forbidden)
 		}
 	}
 }

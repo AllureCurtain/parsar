@@ -6,7 +6,6 @@ import (
 	"io"
 	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -30,6 +29,7 @@ type Process struct {
 	cancel    context.CancelFunc
 	done      chan struct{}
 	killAfter time.Duration
+	platform  processPlatform
 
 	cancelOnce sync.Once
 	waitOnce   sync.Once
@@ -47,7 +47,7 @@ func Start(opts StartOptions) (*Process, error) {
 	}
 
 	ctx, cancel := context.WithCancel(opts.Parent)
-	cmd := exec.CommandContext(ctx, opts.Binary, opts.Args...)
+	cmd := newCommand(ctx, opts.Binary, opts.Args...)
 	cmd.Dir = opts.Dir
 	if len(opts.Env) > 0 {
 		cmd.Env = append([]string{}, opts.Env...)
@@ -79,8 +79,16 @@ func Start(opts StartOptions) (*Process, error) {
 		cancel()
 		return nil, fmt.Errorf("clirunner: start %q: %w", opts.Binary, err)
 	}
+	platform, err := newProcessPlatform(cmd)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		closePipe(stdin)
+		cancel()
+		return nil, fmt.Errorf("clirunner: configure process tree: %w", err)
+	}
 
-	return &Process{
+	process := &Process{
 		Cmd:       cmd,
 		Stdin:     stdin,
 		Stdout:    stdout,
@@ -89,7 +97,16 @@ func Start(opts StartOptions) (*Process, error) {
 		cancel:    cancel,
 		done:      make(chan struct{}),
 		killAfter: opts.KillTimeout,
-	}, nil
+		platform:  platform,
+	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			process.Cancel()
+		case <-process.done:
+		}
+	}()
+	return process, nil
 }
 
 func (p *Process) Context() context.Context {
@@ -113,13 +130,16 @@ func (p *Process) Cancel() {
 		return
 	}
 	p.cancelOnce.Do(func() {
+		// Closing stdin first unblocks adapters waiting for prompt input and
+		// lets them observe cancellation before process termination.
+		closePipe(p.Stdin)
 		if p.Cmd != nil && p.Cmd.Process != nil {
-			_ = p.Cmd.Process.Signal(syscall.SIGTERM)
+			_ = p.platform.graceful(p.Cmd)
 			go func() {
 				select {
 				case <-p.done:
 				case <-time.After(p.killAfter):
-					_ = p.Cmd.Process.Signal(syscall.SIGKILL)
+					_ = p.platform.force(p.Cmd)
 				}
 			}()
 		}
@@ -134,6 +154,7 @@ func (p *Process) Wait() error {
 		return nil
 	}
 	err := p.Cmd.Wait()
+	p.platform.close()
 	p.waitOnce.Do(func() { close(p.done) })
 	return err
 }

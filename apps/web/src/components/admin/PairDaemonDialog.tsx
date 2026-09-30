@@ -14,6 +14,7 @@ import {
 import { Field } from "../ui/label"
 import { Input } from "../ui/input"
 import { StatusIcon } from "../ui/status-icon"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs"
 import { VerbatimBlock } from "../ui/verbatim"
 import { InlineError } from "../runtime/InlineError"
 import { useCreateRuntimePairing, useWorkspaceRuntimes } from "../../lib/api-runtimes"
@@ -31,6 +32,8 @@ interface PairDaemonDialogProps {
    */
   onPaired?: (runtimeID: string) => void
 }
+
+type PairCommandPlatform = "bash" | "powershell"
 
 export function PairDaemonDialog({ open, onClose, workspaceID, onPaired }: PairDaemonDialogProps) {
   const { t } = useTranslation("admin")
@@ -51,6 +54,9 @@ export function PairDaemonDialog({ open, onClose, workspaceID, onPaired }: PairD
     runtimeID: string
   } | null>(null)
   const [paired, setPaired] = useState(false)
+  // The browser cannot know which computer will receive the command. Keep
+  // the choice explicit instead of deriving it from the browser's OS.
+  const [commandPlatform, setCommandPlatform] = useState<PairCommandPlatform>("bash")
 
   const allRuntimes = listQ.data ?? []
   const connected = result
@@ -72,6 +78,7 @@ export function PairDaemonDialog({ open, onClose, workspaceID, onPaired }: PairD
     setName("")
     setResult(null)
     setPaired(false)
+    setCommandPlatform("bash")
     create.reset()
   }
   function close() {
@@ -136,7 +143,8 @@ export function PairDaemonDialog({ open, onClose, workspaceID, onPaired }: PairD
               <ul className="m-0 flex list-disc flex-col gap-0.5 pl-4 text-xs text-fg-muted">
                 <li>
                   {t("runtime.agentDaemon.pair.safetyOutbound", {
-                    defaultValue: "This host opens an outbound connection — no inbound ports required.",
+                    defaultValue:
+                      "This host opens an outbound connection — no inbound ports required.",
                   })}
                 </li>
                 <li>
@@ -146,12 +154,14 @@ export function PairDaemonDialog({ open, onClose, workspaceID, onPaired }: PairD
                 </li>
                 <li>
                   {t("runtime.agentDaemon.pair.safetyState", {
-                    defaultValue: "Config, logs, state and cache are written under ~/.parsar/ — never into the repository the agent is working in.",
+                    defaultValue:
+                      "Config, logs, state and cache are written under ~/.parsar/ — never into the repository the agent is working in.",
                   })}
                 </li>
                 <li>
                   {t("runtime.agentDaemon.pair.safetyOnce", {
-                    defaultValue: "The token is shown once — it cannot be recovered after this dialog closes.",
+                    defaultValue:
+                      "The token is shown once — it cannot be recovered after this dialog closes.",
                   })}
                 </li>
               </ul>
@@ -169,7 +179,9 @@ export function PairDaemonDialog({ open, onClose, workspaceID, onPaired }: PairD
                 {create.isPending && <Loader2 className="animate-spin" />}
                 {create.isPending
                   ? t("runtime.agentDaemon.pair.minting", { defaultValue: "Generating…" })
-                  : t("runtime.agentDaemon.pair.mint", { defaultValue: "Generate connection command" })}
+                  : t("runtime.agentDaemon.pair.mint", {
+                      defaultValue: "Generate connection command",
+                    })}
               </Button>
             </DialogFooter>
           </>
@@ -183,18 +195,86 @@ export function PairDaemonDialog({ open, onClose, workspaceID, onPaired }: PairD
                   name: result.runtimeName,
                 })}
               </p>
-              <DaemonCommandBlock
-                command={buildOneLineCommand(result.token, result.runtimeName, serverPublicURL)}
-                label={t("runtime.agentDaemon.pair.oneLineLabel", {
-                  defaultValue: "Copy and run on the target machine",
-                })}
-                description={t("runtime.agentDaemon.pair.oneLineHint", {
-                  defaultValue:
-                    "The target machine must have one of Claude Code / OpenCode / Codex installed. Once connected, this device flips to “Online”.",
-                })}
-                testId="agent-daemon-pair-copy-oneline"
-              />
-              <p className="flex h-8 items-center gap-2 border-t border-line text-sm text-fg" role="status">
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-medium text-fg">
+                  {t("runtime.agentDaemon.pair.platformLabel", { defaultValue: "Target platform" })}
+                </span>
+                <Tabs
+                  value={commandPlatform}
+                  onValueChange={(value) => setCommandPlatform(value as PairCommandPlatform)}
+                >
+                  <TabsList
+                    className="flex w-full"
+                    aria-label={t("runtime.agentDaemon.pair.platformLabel", {
+                      defaultValue: "Target platform",
+                    })}
+                    data-testid="agent-daemon-pair-platform-tabs"
+                  >
+                    <TabsTrigger
+                      value="bash"
+                      className="flex-1"
+                      data-testid="agent-daemon-pair-platform-bash"
+                    >
+                      {t("runtime.agentDaemon.pair.platformBash", {
+                        defaultValue: "macOS / Linux (Bash)",
+                      })}
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="powershell"
+                      className="flex-1"
+                      data-testid="agent-daemon-pair-platform-powershell"
+                    >
+                      {t("runtime.agentDaemon.pair.platformPowerShell", {
+                        defaultValue: "Windows (PowerShell)",
+                      })}
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value={commandPlatform} className="mt-2">
+                    <DaemonCommandBlock
+                      command={
+                        commandPlatform === "powershell"
+                          ? buildPowerShellCommand(
+                              result.token,
+                              result.runtimeName,
+                              serverPublicURL,
+                            )
+                          : buildOneLineCommand(result.token, result.runtimeName, serverPublicURL)
+                      }
+                      label={t(
+                        commandPlatform === "powershell"
+                          ? "runtime.agentDaemon.pair.powerShellLabel"
+                          : "runtime.agentDaemon.pair.oneLineLabel",
+                        {
+                          defaultValue:
+                            commandPlatform === "powershell"
+                              ? "Copy and run in Windows PowerShell"
+                              : "Copy and run on the target machine",
+                        },
+                      )}
+                      description={t(
+                        commandPlatform === "powershell"
+                          ? "runtime.agentDaemon.pair.powerShellHint"
+                          : "runtime.agentDaemon.pair.oneLineHint",
+                        {
+                          defaultValue:
+                            commandPlatform === "powershell"
+                              ? "Run this command in Windows PowerShell on Windows 10 or 11. It downloads the native daemon and starts it in the background."
+                              : "The target machine must have one of Claude Code / OpenCode / Codex installed. Once connected, this device flips to “Online”.",
+                        },
+                      )}
+                      testId={
+                        commandPlatform === "powershell"
+                          ? "agent-daemon-pair-copy-powershell"
+                          : "agent-daemon-pair-copy-oneline"
+                      }
+                    />
+                  </TabsContent>
+                </Tabs>
+              </div>
+              <p
+                className="flex h-8 items-center gap-2 border-t border-line text-sm text-fg"
+                role="status"
+              >
                 <StatusIcon status={connected ? "completed" : "running"} />
                 {connected
                   ? t("runtime.agentDaemon.pair.connected", { defaultValue: "Device connected" })
@@ -256,13 +336,13 @@ function DaemonCommandBlock({
           {copyStatus === "copied"
             ? t("runtime.agentDaemon.pair.copied", { defaultValue: "Copied" })
             : copyStatus === "failed"
-              ? t("runtime.agentDaemon.pair.copyFailed", { defaultValue: "Select the command below" })
+              ? t("runtime.agentDaemon.pair.copyFailed", {
+                  defaultValue: "Select the command below",
+                })
               : t("runtime.agentDaemon.pair.copy", { defaultValue: "Copy" })}
         </Button>
       </div>
-      <VerbatimBlock className="mt-1">
-        {command}
-      </VerbatimBlock>
+      <VerbatimBlock className="mt-1">{command}</VerbatimBlock>
       <p className="mt-1 text-xs text-fg-muted">{description}</p>
     </div>
   )
@@ -284,6 +364,24 @@ function buildOneLineCommand(token: string, deviceName: string, publicURL?: stri
     `PARSAR_DAEMON_CONNECT_TOKEN=${token}`,
     `PARSAR_DAEMON_CONNECT_DEVICE_NAME=${shellEscape(deviceName)}`,
     `bash`,
+  ].join(" ")
+}
+
+// PowerShell's single-quoted strings do not expand variables or command
+// syntax. Doubling a single quote is the only escaping needed, so all pairing
+// values remain data even when they contain shell metacharacters.
+function powerShellEscape(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`
+}
+
+function buildPowerShellCommand(token: string, deviceName: string, publicURL?: string): string {
+  const origin = serverOrigin(publicURL)
+  const installerURL = `${origin}/api/v1/parsar-daemon/install.ps1`
+  return [
+    `$env:PARSAR_DAEMON_CONNECT_URL = ${powerShellEscape(origin)};`,
+    `$env:PARSAR_DAEMON_CONNECT_TOKEN = ${powerShellEscape(token)};`,
+    `$env:PARSAR_DAEMON_CONNECT_DEVICE_NAME = ${powerShellEscape(deviceName)};`,
+    `Invoke-RestMethod -Uri ${powerShellEscape(installerURL)} | Invoke-Expression`,
   ].join(" ")
 }
 

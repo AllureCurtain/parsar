@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/MiniMax-AI-Dev/parsar/apps/parsar-daemon/internal/daemonize"
 	"github.com/MiniMax-AI-Dev/parsar/apps/parsar-daemon/internal/paths"
@@ -42,19 +40,11 @@ func runLogs(ctx *runContext, args []string) error {
 		return fmt.Errorf("logs: stat: %w", err)
 	}
 
-	// Wire SIGINT so Ctrl-C exits the follow loop cleanly.
+	// Wire the platform interrupt so Ctrl-C exits the follow loop cleanly.
 	rootCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		select {
-		case <-sigCh:
-			cancel()
-		case <-rootCtx.Done():
-		}
-		signal.Stop(sigCh)
-	}()
+	cleanupInterrupt := daemonize.InstallInterruptHandler(rootCtx, cancel)
+	defer cleanupInterrupt()
 
 	return daemonize.Tail(logPath, daemonize.TailOptions{
 		LastLines: *lines,

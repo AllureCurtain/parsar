@@ -170,6 +170,12 @@ description and keep ownership on the side listed here.
 - `parsar-daemon` owns CLI discovery, process spawning, CLI-specific env,
   cwd selection inside its host/container, permission prompts, and translating
   CLI streams into Parsar daemon protocol frames.
+- Daemon background lifecycle mechanics remain platform-local: Unix uses its
+  native signal/session primitives; Windows x64 uses a per-profile user-scoped
+  named pipe and Job Objects for graceful stop and process-tree cleanup.
+- The server may serve public, prebuilt daemon artifacts and shell installers;
+  pairing tokens remain environment-only inputs and must not enter download
+  URLs or process arguments.
 - `internal/agentdaemon/proto` is the only shared wire contract between the
   server and daemon. The daemon must not import `server/internal/...`, and the
   server must not import daemon-internal adapter packages.

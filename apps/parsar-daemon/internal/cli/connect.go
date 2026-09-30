@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/MiniMax-AI-Dev/parsar/apps/parsar-daemon/internal/agent"
@@ -402,18 +400,16 @@ func mainLoop(rc *runContext, profile string, prof auth.Profile, agentCLIs agent
 	rootCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Honour SIGINT / SIGTERM as graceful shutdown.
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		select {
-		case sig := <-sigCh:
-			obslog.Bg().Info("received signal, shutting down", "signal", sig.String())
-			cancel()
-		case <-rootCtx.Done():
-		}
-		signal.Stop(sigCh)
-	}()
+	// Install platform-native graceful shutdown (signals on Unix, a
+	// per-profile named pipe plus Ctrl+C on Windows). If the pipe cannot be
+	// created, continue with the normal connection; `stop` will use its
+	// bounded native termination fallback.
+	shutdownCleanup, shutdownErr := daemonize.InstallShutdownHandler(rootCtx, profile, cancel)
+	if shutdownErr != nil {
+		obslog.Bg().Warn("graceful shutdown channel unavailable", "err", shutdownErr)
+	} else {
+		defer shutdownCleanup()
+	}
 
 	bootCtx, bootCancel := context.WithTimeout(rootCtx, bootstrapTimeout)
 	boot, err := transport.Bootstrap(bootCtx, prof.ServerURL, prof.RuntimeID, prof.RunnerCredential, Version)

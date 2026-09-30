@@ -2197,10 +2197,15 @@
         "connected": "Device connected",
         "copied": "Copied",
         "copyFailed": "Select the command below",
+        "platformLabel": "Target platform",
+        "platformBash": "macOS / Linux (Bash)",
+        "platformPowerShell": "Windows (PowerShell)",
         "oneLineLabel": "Copy and run on the target machine",
+        "powerShellLabel": "Copy and run in Windows PowerShell",
         "safetyClaude": "Agent CLI, files, and secrets stay on this machine.",
         "waitingConnection": "Waiting for the device to connect…",
-        "safetyState": "Config, logs, state and cache are written under ~/.parsar/ — never into the repository the agent is working in."
+        "safetyState": "Config, logs, state and cache are written under ~/.parsar/ — never into the repository the agent is working in.",
+        "powerShellHint": "Run this command in Windows PowerShell on Windows 10 or 11. It downloads the native daemon and starts it in the background."
       },
       "delete": {
         "confirm": "Delete"

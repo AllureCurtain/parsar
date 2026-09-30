@@ -17,8 +17,15 @@ const defaultDaemonBinaryDir = "/usr/local/share/parsar/daemon"
 // ever sends (it normalizes uname output to these). Treating them as a fixed
 // allowlist is what keeps a crafted os/arch from escaping BinaryDir.
 var (
-	daemonBinaryOS   = map[string]bool{"darwin": true, "linux": true}
+	daemonBinaryOS   = map[string]bool{"darwin": true, "linux": true, "windows": true}
 	daemonBinaryArch = map[string]bool{"amd64": true, "arm64": true}
+	// daemonBinaryTargets is intentionally stricter than the independent
+	// OS/arch sets: Windows is released only for x64 in the first delivery.
+	daemonBinaryTargets = map[string]map[string]bool{
+		"darwin":  {"amd64": true, "arm64": true},
+		"linux":   {"amd64": true, "arm64": true},
+		"windows": {"amd64": true},
+	}
 )
 
 type ParsarDaemonDownloadConfig struct {
@@ -49,7 +56,7 @@ func RegisterParsarDaemonDownloadRoute(r chi.Router, cfg ParsarDaemonDownloadCon
 //	@Tags		runtimes
 //	@ID			downloadParsarDaemon
 //	@Produce	octet-stream
-//	@Param		os query string true "target GOOS" Enums(darwin, linux)
+//	@Param		os query string true "target GOOS" Enums(darwin, linux, windows)
 //	@Param		arch query string true "target GOARCH" Enums(amd64, arm64)
 //	@Success	200 {file} binary "parsar-daemon binary stream"
 //	@Failure	400 {string} string "os/arch not in the accepted allowlist"
@@ -59,12 +66,12 @@ func parsarDaemonDownloadHandler(dir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		goos := req.URL.Query().Get("os")
 		goarch := req.URL.Query().Get("arch")
-		if !daemonBinaryOS[goos] || !daemonBinaryArch[goarch] {
-			http.Error(w, "os must be one of [darwin linux] and arch one of [amd64 arm64]", http.StatusBadRequest)
+		if !daemonBinaryOS[goos] || !daemonBinaryArch[goarch] || !daemonBinaryTargets[goos][goarch] {
+			http.Error(w, "unsupported os/arch; accepted targets are darwin/{amd64,arm64}, linux/{amd64,arm64}, windows/{amd64}", http.StatusBadRequest)
 			return
 		}
 
-		name := "parsar-daemon-" + goos + "-" + goarch
+		name := daemonBinaryName(goos, goarch)
 		f, err := os.Open(filepath.Join(dir, name))
 		if err != nil {
 			http.Error(w, "no parsar-daemon binary for "+goos+"/"+goarch+" in this image", http.StatusNotFound)
@@ -83,4 +90,12 @@ func parsarDaemonDownloadHandler(dir string) http.HandlerFunc {
 		w.Header().Set("Cache-Control", "no-store")
 		http.ServeContent(w, req, name, stat.ModTime(), f)
 	}
+}
+
+func daemonBinaryName(goos, goarch string) string {
+	name := "parsar-daemon-" + goos + "-" + goarch
+	if goos == "windows" {
+		name += ".exe"
+	}
+	return name
 }

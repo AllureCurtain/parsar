@@ -145,6 +145,13 @@ func EnsureLogFile(path string) error {
 	if err != nil {
 		return fmt.Errorf("daemonize.EnsureLogFile: %w", err)
 	}
+	// Windows ignores the Unix umask and may preserve a broader mode on an
+	// existing file; explicitly tighten it where the platform supports mode
+	// bits so profile logs remain private on every OS.
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("daemonize.EnsureLogFile: chmod: %w", err)
+	}
 	return f.Close()
 }
 
