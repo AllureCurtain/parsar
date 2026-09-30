@@ -443,6 +443,28 @@ description and keep ownership on the side listed here.
   Existing users must authenticate as the invited account; acceptance must
   preserve their identities and passwords, and rejected attempts must leave
   the invitation available for its recipient.
+- Managed Agent exports live in `server/internal/api/managedagents`; their
+  persistence lives in the store's `managed_agent_*` files. Browser sessions
+  administer exports, while `pma_` bearer credentials authenticate only the
+  `/api/v1/managed` surface. Never accept these credentials as browser, daemon,
+  or workspace-wide access.
+- Each export binds a named external client to one workspace and agent. Store
+  only token hashes and prefixes; disclose the token only on creation/rotation.
+  Check expiry, revocation, and the issuing administrator's current membership
+  on every request. Rotation preserves the client's session ownership.
+- Managed runs use the existing conversation/message/run and connector lifecycle.
+  Session ownership and `(client, Idempotency-Key)` deduplication are durable;
+  commit the message, run, ownership and request fingerprint together before
+  dispatch. Changed input under the same key conflicts. Queued daemon runs are
+  recoverable after restart; duplicate dispatch claims must be harmless.
+  Streaming claims take a transaction-scoped advisory lock per conversation
+  and Agent before checking for a running sibling. Managed cancellation,
+  its terminal event and audit record commit in one transaction.
+- Public event streams replay persisted run sequences and support Last-Event-ID.
+  Closing a stream does not cancel a run. External human decisions require an
+  explicit credential scope and use the canonical interaction service, including
+  its acknowledgements, expiry, audit and secret-answer redaction.
+
 - New persistent state starts with a migration and sqlc query. Avoid direct
   SQL embedded in route handlers or connector code unless the package already
   owns that persistence boundary and tests cover it.

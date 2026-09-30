@@ -463,6 +463,36 @@ type GatewaySession struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ManagedAgentClient struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	CreatedBy         pgtype.UUID        `json:"created_by"`
+	Name              string             `json:"name"`
+	TokenHash         string             `json:"token_hash"`
+	TokenPrefix       string             `json:"token_prefix"`
+	AllowInteractions bool               `json:"allow_interactions"`
+	ExpiresAt         pgtype.Timestamptz `json:"expires_at"`
+	RevokedAt         pgtype.Timestamptz `json:"revoked_at"`
+	LastUsedAt        pgtype.Timestamptz `json:"last_used_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ManagedAgentRequest struct {
+	ClientID       pgtype.UUID        `json:"client_id"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	RequestHash    string             `json:"request_hash"`
+	RunID          pgtype.UUID        `json:"run_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type ManagedAgentSession struct {
+	ConversationID pgtype.UUID        `json:"conversation_id"`
+	ClientID       pgtype.UUID        `json:"client_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 // user/workspace-level memory, self-written by agents + audited by users afterwards
 type Memory struct {
 	// Internal memory ID

@@ -2349,55 +2349,6 @@ func (s *Store) RequeueFailedAgentRun(ctx context.Context, input RequeueAgentRun
 	return RequeueAgentRunResult{RunID: row.ID, WorkspaceID: row.WorkspaceID, ConversationID: row.ConversationID, AgentID: row.AgentID, Status: "queued"}, nil
 }
 
-func (s *Store) CancelAgentRun(ctx context.Context, runID, reason string) (bool, error) {
-	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		reason = "user_clicked_cancel"
-	}
-	runUUID, err := uuid(runID)
-	if err != nil {
-		return false, err
-	}
-	now := time.Now().UTC()
-	tx, err := beginTx(ctx, s.db)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback(ctx)
-
-	tag, err := tx.Exec(ctx, `
-update agent_runs
-set status = 'cancelled',
-    failure_reason = $2,
-    finished_at = $3,
-    updated_at = $3,
-    metadata = metadata || jsonb_build_object('cancel_reason', $2::text)
-where id = $1::uuid
-  and status not in ('completed', 'failed', 'cancelled')`, runUUID, reason, timestamptz(now))
-	if err != nil {
-		return false, err
-	}
-	transitioned := tag.RowsAffected() == 1
-	if !transitioned {
-		var exists bool
-		if err := tx.QueryRow(ctx, `select exists(select 1 from agent_runs where id = $1::uuid)`, runUUID).Scan(&exists); err != nil {
-			return false, err
-		}
-		if !exists {
-			return false, fmt.Errorf("%w: %s", ErrUnknownAgentRun, runID)
-		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return false, err
-	}
-	// Serial-queue handoff: cancelling a running run lets the next queued
-	// sibling move forward.
-	if transitioned {
-		s.dispatchNextQueuedRunAfter(ctx, runID)
-	}
-	return transitioned, nil
-}
-
 // SupersededRun is a lightweight descriptor of a run that was
 // cancelled because a newer prompt superseded it.
 type SupersededRun struct {
@@ -6188,69 +6139,9 @@ where id = $1::uuid`, runID, runtimeUUID, runtime.WorkingDirectory, patch, times
 	return nil
 }
 
-func (s *Store) MarkAgentRunRunning(ctx context.Context, runID string, conversationID string) (MarkAgentRunRunningResult, error) {
-	now := time.Now().UTC()
-	runUUID, err := uuid(runID)
-	if err != nil {
-		return MarkAgentRunRunningResult{}, err
-	}
-	conversationUUID, err := uuid(conversationID)
-	if err != nil {
-		return MarkAgentRunRunningResult{}, err
-	}
-	// NOT EXISTS clause enforces at most one running run per (conversation, agent).
-	// If a sibling is already running, UPDATE matches 0 rows and we return
-	// ErrAgentRunBlockedByQueue. Slow-path defender behind HasInflightRunForConversationAgent's
-	// fast check; closes the race between two messages arriving before either marks-running.
-	row := s.db.QueryRow(ctx, `
-update agent_runs
-set status = 'running',
-    started_at = coalesce(started_at, $3),
-    updated_at = $3,
-    metadata = metadata || jsonb_build_object('started_by', 'conversation_stream')
-where id = $1::uuid
-  and conversation_id = $2::uuid
-  and status = 'queued'
-  and not exists (
-    select 1 from agent_runs r2
-    where r2.conversation_id = $2::uuid
-      and r2.agent_id = (select agent_id from agent_runs where id = $1::uuid)
-      and r2.status = 'running'
-      and r2.id != $1::uuid
-  )
-returning id::text, workspace_id::text, conversation_id::text, status, started_at`, runUUID, conversationUUID, timestamptz(now))
-	var result MarkAgentRunRunningResult
-	var startedAt pgtype.Timestamptz
-	if err := row.Scan(&result.RunID, &result.WorkspaceID, &result.ConversationID, &result.Status, &startedAt); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			exists, existsErr := sqlc.New(s.db).AgentRunExists(ctx, runUUID)
-			if existsErr != nil {
-				return MarkAgentRunRunningResult{}, existsErr
-			}
-			if !exists {
-				return MarkAgentRunRunningResult{}, fmt.Errorf("%w: %s", ErrUnknownAgentRun, runID)
-			}
-			// Disambiguate: queued in THIS conversation (blocked by sibling)
-			// vs past-queued or foreign-conversation (not startable). The
-			// conversation_id predicate keeps a wrong-conversation run — queued
-			// but not ours to start — off the blocked-by-queue branch.
-			var status string
-			if err := s.db.QueryRow(ctx,
-				`select status from agent_runs where id = $1::uuid and conversation_id = $2::uuid`,
-				runUUID, conversationUUID).Scan(&status); err == nil && status == "queued" {
-				return MarkAgentRunRunningResult{}, fmt.Errorf("%w: %s", ErrAgentRunBlockedByQueue, runID)
-			}
-			return MarkAgentRunRunningResult{}, fmt.Errorf("%w: %s", ErrAgentRunNotStartable, runID)
-		}
-		return MarkAgentRunRunningResult{}, err
-	}
-	result.StartedAt = pgTime(startedAt)
-	return result, nil
-}
-
 // HasInflightRunForConversationAgent reports whether the (conversation, agent)
 // tuple identified by runID has any sibling run in 'running' state. Fast-path check;
-// MarkAgentRunRunning's NOT EXISTS guard closes the race window.
+// MarkAgentRunRunning's transaction-scoped lane lock closes the race window.
 func (s *Store) HasInflightRunForConversationAgent(ctx context.Context, runID string) (bool, error) {
 	runUUID, err := uuid(runID)
 	if err != nil {

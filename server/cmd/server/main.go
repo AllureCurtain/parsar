@@ -735,6 +735,7 @@ func main() {
 		}
 		sessionStore := auth.NewPostgresSessionStore(sqlc.New(pool))
 		authMw := auth.NewMiddleware(sessionStore).WithDevAuth(cfg.Auth.DevAuth)
+		mountManagedAgents(r, dbStore, authMw, connectorReg, interactionService)
 		r.Group(func(r chi.Router) {
 			r.Use(authMw.Require)
 			mcpdirectoryapi.RegisterRoutes(r, mcpdirectoryapi.Deps{
@@ -836,6 +837,7 @@ func main() {
 	// K8s callers must size terminationGracePeriodSeconds accordingly.
 	ctx, stop := serverRootCtx, serverRootStop
 	defer stop()
+	startManagedAgentRecovery(ctx, dbStore)
 
 	if auditIngester != nil {
 		auditIngester.Start(ctx)
@@ -2863,35 +2865,6 @@ func (slogWorkerLogger) Info(msg string, args ...any) {
 }
 func (slogWorkerLogger) Warn(msg string, args ...any) {
 	log.Bg().Warn("feishu outbound: "+msg, args...)
-}
-
-// streamingDispatcherAdapter bridges store.StreamingDispatcher to
-// dev.StartConversationRun. `store` and `dev` don't import each other;
-// main is the only place both arrive together.
-//
-// Fire-and-forget per the interface contract: failures surface to the
-// user via the SSE /stream error event + agent_runs.status=failed.
-// We use slog (not the audit ingester) because these errors point at
-// concrete wiring/connectivity issues operators need to see in stdout.
-type streamingDispatcherAdapter struct {
-	runtimeStore dev.RuntimeStore
-	deps         dev.StreamingDispatchDeps
-	failRun      func(ctx context.Context, runID, source, reason string)
-}
-
-func (a streamingDispatcherAdapter) Start(ctx context.Context, in store.StreamingDispatchInput) {
-	_, err := dev.StartConversationRun(ctx, a.runtimeStore, a.deps, in.RunID, in.ConversationID)
-	if err == nil {
-		return
-	}
-	log.Bg().Error("streaming dispatcher: auto-start failed",
-		"run_id", in.RunID,
-		"conversation_id", in.ConversationID,
-		"connector_type", in.ConnectorType,
-		"error", err)
-	if a.failRun != nil {
-		a.failRun(ctx, in.RunID, in.ConnectorType, "auto-start failed: "+err.Error())
-	}
 }
 
 // blobDownloadAdapter exposes blob.Store on the agent-daemon connector's

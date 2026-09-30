@@ -26,7 +26,7 @@ type runStreamStore interface {
 }
 
 // inflightChecker is the optional store interface for the fast-path
-// "is a sibling already running" check. The slow-path NOT EXISTS guard
+// "is a sibling already running" check. The transaction-scoped lane lock
 // inside MarkAgentRunRunning actually defends the race, so callers can
 // treat a missing implementation as "no fast check".
 type inflightChecker interface {
@@ -87,7 +87,7 @@ func StartConversationRun(
 	// Fast-path serial-queue check: if another run for the same
 	// (conversation, agent) is already running, don't dispatch
 	// this one. The fast-path is an optimization — MarkAgentRunRunning's
-	// NOT EXISTS guard is the actual race defender.
+	// transaction-scoped lane lock is the actual race defender.
 	if checker, ok := runtimeStore.(inflightChecker); ok {
 		inflight, checkErr := checker.HasInflightRunForConversationAgent(ctx, runID)
 		if checkErr != nil {
